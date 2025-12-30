@@ -1,0 +1,13 @@
+GLOBAL_ACCURACY: 0.79661
+
+              precision    recall  f1-score   support
+
+      desert      0.852     0.979     0.911        94
+      forest      0.877     0.949     0.912        98
+        snow      0.973     0.473     0.637       150
+       urban      0.947     0.918     0.932        97
+       water      0.341     0.939     0.500        33
+
+    accuracy                          0.797       472
+   macro avg      0.798     0.852     0.778       472
+weighted avg      0.879     0.797     0.800       472

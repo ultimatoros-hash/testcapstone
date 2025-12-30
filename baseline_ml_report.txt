@@ -1,0 +1,12 @@
+RF_ACCURACY: 0.96929
+              precision    recall  f1-score   support
+
+      desert       0.99      0.99      0.99       118
+      forest       0.96      0.94      0.95       130
+        snow       0.92      0.95      0.94       111
+       urban       1.00      0.98      0.99       119
+       water       0.98      1.00      0.99        43
+
+    accuracy                           0.97       521
+   macro avg       0.97      0.97      0.97       521
+weighted avg       0.97      0.97      0.97       521
