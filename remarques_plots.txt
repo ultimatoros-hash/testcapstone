@@ -1,0 +1,50 @@
+I. Audit des Biais et des Données (Data Engineering)
+Figure 3.4 : Distribution par Hémisphère
+
+Remarque : L'audit révèle un déséquilibre géographique majeur, avec plus de 5 500 images issues de l'hémisphère Nord contre environ 1 200 pour le Sud. Ce biais peut limiter la capacité du modèle à généraliser aux biomes tropicaux ou austraux dont les caractéristiques spectrales diffèrent.
+
+Figure 3.5 : Densité Géographique (Biais d'échantillonnage)
+
+Remarque : La répartition spatiale montre une concentration hétérogène des données, avec des zones de forte densité dépassant 700 images par point d'échantillonnage, principalement en Europe et Amérique du Nord. Cette hégémonie spatiale risque de spécialiser le modèle sur les caractéristiques visuelles des paysages occidentaux au détriment d'une vision planétaire globale.
+
+Figure 3.6 : Distribution des Sources de Données
+
+Remarque : Le dataset présente une dépendance critique envers le fournisseur Esri (plus de 6 000 images) par rapport à USGS. Cette disparité expose le modèle à un biais lié aux capteurs et aux post-traitements spécifiques de la plateforme Esri, pouvant affecter la robustesse lors de l'utilisation d'autres sources satellitaires.
+
+II. Métriques Physiques et Interprétabilité (Protocoles F & XAI)
+Figure 4.1a : Entropie Spatiale (Complexité Texturale)
+
+Remarque : La classe urban affiche l'entropie la plus élevée (médiane à 7,4), reflétant la grande complexité des structures anthropiques. En revanche, les classes snow et water présentent une forte dispersion, ce qui explique les confusions spectrales entre ces surfaces lisses et homogènes.
+
+Figure 4.1b : Index VARI (Santé de la Végétation)
+
+Remarque : L'indice VARI confirme la validité biophysique des données : la classe forest est la seule à se situer majoritairement au-dessus du seuil de végétation de 0,2. Les valeurs négatives pour desert et water valident la capacité du modèle à utiliser des indices biophysiques pour discriminer les biomes.
+
+Analyse du Spectre FFT
+
+Remarque : L'analyse fréquentielle montre des signatures distinctes par classe, notamment pour urban qui présente des composantes hautes-fréquences diffuses, tandis que desert montre des pics de fréquences directionnelles liés aux motifs géométriques des dunes.
+
+Explication LIME : Classe Forest
+
+Remarque : La méthode LIME démontre que le modèle prend ses décisions en s'appuyant sur des zones de texture granulaire (les canopées). Cela prouve que l'IA ne se contente pas d'identifier la couleur verte mais analyse bien les caractéristiques texturales de la forêt.
+
+III. Évaluation des Performances (Metrics & Robustness)
+
+Baseline (Random Forest) vs MobileNetV2 
+
+
+
+Remarque : La baseline Random Forest atteint une précision de 96,9% contre 79,7% pour le modèle de Deep Learning. Cet écart s'explique par la difficulté du CNN à gérer la classe snow, dont le rappel chute à 47,3% en raison d'une confusion massive avec water (36,0%).
+
+
+Courbes d'Entraînement (Transfer Learning)
+
+Remarque : On observe une amélioration nette de la précision et une baisse de la perte après l'epoch 12, moment correspondant au passage en Fine-Tuning (ligne verte). La stabilisation des courbes de validation indique une convergence réussie du modèle vers le domaine satellitaire.
+
+Projection t-SNE des Caractéristiques
+
+Remarque : La projection 2D révèle des grappes (clusters) parfaitement isolées pour forest et urban. La proximité visuelle des clusters snow et water dans l'espace latent illustre parfaitement la difficulté mathématique du modèle à séparer ces deux classes spectralement similaires.
+
+Figure 5.3 : Robustesse face aux Dégradations
+
+Remarque : Le modèle démontre une résilience exceptionnelle au flou atmosphérique (>90% d'accuracy). Cependant, il est très vulnérable au bruit de capteur, la précision tombant sous les 40% dès l'apparition d'un faible bruit Gaussien, indiquant une forte dépendance aux hautes fréquences visuelles pour la classification.

@@ -1,7 +1,6 @@
 import requests
 import os
 
-# Test URLs for the 3 providers
 TEST_URLS = {
     "ESRI": "https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/16/24636/19024",
     "USGS": "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/16/24636/19024",

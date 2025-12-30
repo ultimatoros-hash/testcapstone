@@ -177,7 +177,7 @@ def train():
             
     if base_model:
         base_model.trainable = True
-        # Unfreeze last 50 layers for complex geometry learning
+        # Unfreeze last 50 layers for complex geometry learnin
         for layer in base_model.layers[:-50]: 
             layer.trainable = False
         print(f"✅ Unfrozen last 50 layers of {base_model.name}")

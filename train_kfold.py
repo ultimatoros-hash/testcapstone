@@ -78,7 +78,7 @@ def run_kfold():
         
         # Train & Evaluate
         model = get_model(len(class_names))
-        model.fit(train_ds, epochs=EPOCHS, verbose=0) # Silent training
+        model.fit(train_ds, epochs=EPOCHS, verbose=0) # Silent trainin
         
         _, acc = model.evaluate(val_ds, verbose=0)
         print(f"   ✅ Score: {acc*100:.2f}%")

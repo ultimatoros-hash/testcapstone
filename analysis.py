@@ -16,7 +16,7 @@ PALETTE = {
     "water": "#3b82f6",  # Blue
     "forest": "#16a34a", # Green
     "urban": "#ef4444",  # Red
-    "desert": "#f97316"  # Orange
+    "desert": "#f97316"  # Orang
 }
 
 def run_analysis():

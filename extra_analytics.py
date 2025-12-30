@@ -1,28 +1,32 @@
 import os
-import time
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import tensorflow as tf
-from sklearn.calibration import calibration_curve
-from mpl_toolkits.mplot3d import Axes3D
+from sklearn.decomposition import PCA
+import umap
+from scipy import fftpack
+from skimage.measure import shannon_entropy
+from lime import lime_image
+from skimage.segmentation import mark_boundaries
 from tensorflow.keras import layers
 
-# --- CONFIGURATION ---
+# --- CONFIG ---
 DATA_DIR = "data/raw/images"
 PLOT_DIR = "data/plots"
-MODEL_PATH = "models/satellite_mobilenet.h5"
-CLASSES_FILE = "models/classes.txt"
 IMG_SIZE = (128, 128)
-BATCH_SIZE = 32
+MODEL_PATH = "models/satellite_mobilenet.h5"
 
-# Consistent colors
 PALETTE = {
-    "snow": "#d1d5db", "water": "#3b82f6", "forest": "#16a34a", 
-    "urban": "#ef4444", "desert": "#f97316"
+    "snow": "#d1d5db", "water": "#3b82f6", 
+    "forest": "#16a34a", "urban": "#ef4444", "desert": "#f97316"
 }
 
-# --- CUSTOM LAYERS (Pass-through for loading) ---
+# --- CUSTOM LAYERS (REQUIRED FOR LOADING) ---
+@tf.keras.utils.register_keras_serializable()
+class ColorJitter(layers.Layer):
+    def call(self, inputs, training=None): return inputs
+
 @tf.keras.utils.register_keras_serializable()
 class GentleCloudAugmentation(layers.Layer):
     def call(self, inputs, training=None): return inputs
@@ -35,170 +39,103 @@ class SensorThermalNoise(layers.Layer):
 class AtmosphericScattering(layers.Layer):
     def call(self, inputs, training=None): return inputs
 
-def load_resources():
-    """Loads model and ensures class names align with training."""
-    if not os.path.exists(MODEL_PATH):
-        print(f"❌ Model missing: {MODEL_PATH}")
-        return None, None
-
-    try:
-        model = tf.keras.models.load_model(MODEL_PATH, custom_objects={
-            'GentleCloudAugmentation': GentleCloudAugmentation,
-            'SensorThermalNoise': SensorThermalNoise,
-            'AtmosphericScattering': AtmosphericScattering
-        })
-        
-        # Load the EXACT classes used during training
-        if os.path.exists(CLASSES_FILE):
-            with open(CLASSES_FILE, 'r') as f:
-                model_classes = f.read().splitlines()
-            print(f"✅ Loaded {len(model_classes)} classes from metadata.")
-        else:
-            print("⚠️ Classes file missing. Inferring from folder structure (risk of mismatch).")
-            model_classes = None
-            
-        return model, model_classes
-    except Exception as e:
-        print(f"❌ Error loading model: {e}")
-        return None, None
-
-def load_validation_data(expected_classes=None):
-    """Loads validation data and verifies class alignment."""
-    print("⏳ Loading Validation Data...")
-    val_ds = tf.keras.utils.image_dataset_from_directory(
-        DATA_DIR, validation_split=0.2, subset="validation", seed=123,
-        image_size=IMG_SIZE, batch_size=BATCH_SIZE, shuffle=False
+def load_sample_data(num_samples=300):
+    print("Loading sample data for biophysics...")
+    ds = tf.keras.utils.image_dataset_from_directory(
+        DATA_DIR, image_size=IMG_SIZE, batch_size=32, shuffle=True, seed=42
     )
-    
-    ds_classes = val_ds.class_names
-    
-    # Critical Check: Ensure Dataset classes match Model classes
-    if expected_classes and ds_classes != expected_classes:
-        print(f"⚠️ CRITICAL WARNING: Class Mismatch!")
-        print(f"   Model expects: {expected_classes}")
-        print(f"   Dataset found: {ds_classes}")
-        print("   -> Predictions will be wrong. Check folder names or sorting.")
-    
     images, labels = [], []
-    for imgs, lbls in val_ds:
-        images.append(imgs.numpy())
-        labels.append(lbls.numpy())
+    class_names = ds.class_names
+    for batch_img, batch_lbl in ds.take(num_samples // 32 + 1):
+        images.extend(batch_img.numpy())
+        labels.extend(batch_lbl.numpy())
+    return np.array(images[:num_samples]), np.array(labels[:num_samples]), class_names
+
+def calculate_vari(image):
+    """
+    Visible Atmospherically Resistant Index (VARI)
     
-    return np.concatenate(images), np.concatenate(labels), ds_classes
+    """
+    img = image.astype('float32')
+    R, G, B = img[:,:,0], img[:,:,1], img[:,:,2]
+    
+    numerator = G - R
+    denominator = G + R - B
+    vari_map = numerator / (denominator + 1e-6)
+    return np.median(np.clip(vari_map, -1.0, 1.0))
 
 def run_analytics():
     if not os.path.exists(PLOT_DIR): os.makedirs(PLOT_DIR)
     
-    # 1. Load Model & Metadata
-    model, model_classes = load_resources()
-    if not model: return
-
-    # 2. Load Data
-    # Use model_classes for validation if available
-    images, labels, ds_classes = load_validation_data(model_classes)
-    class_names = model_classes if model_classes else ds_classes
-
-    # 3. Inference
-    print("🧠 Running Inference...")
-    probs = model.predict(images, verbose=1)
-    preds = np.argmax(probs, axis=1).flatten() # Flatten to ensure shape (N,)
-    labels = labels.flatten() # Flatten to ensure shape (N,)
-    confidences = np.max(probs, axis=1)
-
-    # ---------------------------------------------------------
-    # PLOT: WORST FAILURES (Fixed Logic)
-    # ---------------------------------------------------------
-    print("❌ Generating Figure 6.2: Top-5 Confident Failures...")
+    # 1. Load Data
+    imgs, lbls, names = load_sample_data(300)
     
-    # Identify errors
-    incorrect_mask = (preds != labels)
-    incorrect_indices = np.where(incorrect_mask)[0]
+    # --- PART 1: BIOPHYSICAL METRICS ---
+    print("📊 Generating Figure 4.1: Biophysical Metrics...")
+    metrics = {'entropy': [], 'vari': [], 'label': []}
     
-    if len(incorrect_indices) > 0:
-        # Get confidences ONLY for the errors
-        error_confs = confidences[incorrect_indices]
-        
-        # Sort errors by confidence (High -> Low)
-        # We want the errors where the model was MOST confident (but wrong)
-        sorted_indices_local = np.argsort(error_confs)[::-1][:5]
-        top_failure_indices = incorrect_indices[sorted_indices_local]
-        
-        fig, axes = plt.subplots(1, 5, figsize=(20, 5))
-        if len(top_failure_indices) < 5: 
-            # Handle case with <5 errors (rare but possible)
-            axes = axes[:len(top_failure_indices)]
-            
-        for i, idx in enumerate(top_failure_indices):
-            # Safe access to image
-            img = images[idx].astype("uint8")
-            
-            # Get integer IDs
-            true_id = labels[idx]
-            pred_id = preds[idx]
-            
-            # Lookup string names safely
-            true_lbl = class_names[true_id] if true_id < len(class_names) else "Unknown"
-            pred_lbl = class_names[pred_id] if pred_id < len(class_names) else "Unknown"
-            
-            conf = probs[idx, pred_id] * 100
-            
-            # Plot
-            ax = axes[i] if len(top_failure_indices) > 1 else axes
-            ax.imshow(img)
-            ax.set_title(f"Pred: {pred_lbl} ({conf:.1f}%)\nTrue: {true_lbl}", 
-                         color="#d62728", fontweight="bold", fontsize=10)
-            ax.axis("off")
-        
-        plt.suptitle("Figure 6.2: Top-5 'Most Confident' Failures", fontsize=16)
-        plt.tight_layout()
-        plt.savefig(f"{PLOT_DIR}/worst_failures.png")
-        plt.close()
-    else:
-        print("   ✨ Amazing! 0 errors found in validation set.")
-
-    # ---------------------------------------------------------
-    # PLOT: CALIBRATION CURVE
-    # ---------------------------------------------------------
-    print("📉 Generating Figure 6.1: Reliability...")
-    is_correct = (preds == labels).astype(int)
-    prob_true, prob_pred = calibration_curve(is_correct, confidences, n_bins=10, strategy='uniform')
-    
-    plt.figure(figsize=(6, 6))
-    plt.plot([0, 1], [0, 1], "k--", label="Perfect Calibration")
-    plt.plot(prob_pred, prob_true, "s-", color="#2ecc71", label="Model")
-    plt.xlabel("Confidence")
-    plt.ylabel("Accuracy")
-    plt.title("Reliability Diagram")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.savefig(f"{PLOT_DIR}/calibration_curve.png")
-    plt.close()
-
-    # ---------------------------------------------------------
-    # PLOT: 3D COLOR SPACE
-    # ---------------------------------------------------------
-    print("🌈 Generating Figure 6.4: 3D Scatter...")
-    subset_idx = np.random.choice(len(images), min(500, len(images)), replace=False)
-    sub_imgs = images[subset_idx]
-    sub_lbls = labels[subset_idx]
-    
-    r = sub_imgs[:, :, :, 0].mean(axis=(1, 2))
-    g = sub_imgs[:, :, :, 1].mean(axis=(1, 2))
-    b = sub_imgs[:, :, :, 2].mean(axis=(1, 2))
-    
-    fig = plt.figure(figsize=(10, 8))
-    ax = fig.add_subplot(111, projection='3d')
-    for i, name in enumerate(class_names):
+    for img, lbl_idx in zip(imgs, lbls):
+        name = names[lbl_idx]
         if name not in PALETTE: continue
-        mask = (sub_lbls == i)
-        ax.scatter(r[mask], g[mask], b[mask], c=PALETTE[name], label=name, alpha=0.6)
+        
+        # Entropy (Texture)
+        gray = tf.image.rgb_to_grayscale(img).numpy().squeeze().astype('uint8')
+        metrics['entropy'].append(shannon_entropy(gray))
+        
+        # VARI (Vegetation)
+        metrics['vari'].append(calculate_vari(img))
+        metrics['label'].append(name)
     
-    ax.set_xlabel('Red'); ax.set_ylabel('Green'); ax.set_zlabel('Blue')
-    plt.legend()
-    plt.savefig(f"{PLOT_DIR}/3d_color_space.png")
-    plt.close()
-
-    print("✅ Advanced Analytics Complete.")
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    sns.boxplot(x='label', y='entropy', data=metrics, ax=ax1, palette=PALETTE)
+    ax1.set_title("Figure 4.1a: Spatial Entropy (Texture Complexity)")
+    
+    sns.boxplot(x='label', y='vari', data=metrics, ax=ax2, palette=PALETTE)
+    ax2.set_title("Figure 4.1b: VARI Index (Vegetation Health)")
+    ax2.axhline(0.2, color='green', linestyle='--', alpha=0.5, label='Veg Threshold')
+    
+    plt.tight_layout()
+    plt.savefig(f"{PLOT_DIR}/physical_metrics.png")
+    
+    # --- PART 2: FFT ANALYSIS ---
+    # 
+    print("🌊 Generating Figure 4.2: FFT Frequency Analysis...")
+    fig, axes = plt.subplots(1, 5, figsize=(20, 4))
+    for i, target in enumerate(PALETTE.keys()):
+        if target not in names: continue
+        idx = np.where(lbls == names.index(target))[0]
+        if len(idx) > 0:
+            img_gray = np.mean(imgs[idx[0]], axis=2)
+            f = fftpack.fft2(img_gray)
+            fshift = fftpack.fftshift(f)
+            magnitude = 20 * np.log(np.abs(fshift) + 1e-6)
+            axes[i].imshow(magnitude, cmap='inferno')
+            axes[i].set_title(target.title())
+            axes[i].axis('off')
+    plt.savefig(f"{PLOT_DIR}/fft_spectrum_analysis.png")
+    
+    # --- PART 3: LIME EXPLANATION ---
+    # 
+    print("🍋 Generating Figure 4.4: LIME Explanation...")
+    try:
+        model = tf.keras.models.load_model(MODEL_PATH, custom_objects={
+            'ColorJitter': ColorJitter,
+            'GentleCloudAugmentation': GentleCloudAugmentation, 
+            'SensorThermalNoise': SensorThermalNoise, 
+            'AtmosphericScattering': AtmosphericScattering
+        })
+        
+        explainer = lime_image.LimeImageExplainer()
+        exp = explainer.explain_instance(imgs[0].astype('double'), model.predict, top_labels=1, hide_color=0, num_samples=100)
+        temp, mask = exp.get_image_and_mask(exp.top_labels[0], positive_only=True, num_features=5, hide_rest=False)
+        
+        plt.figure(figsize=(6, 6))
+        plt.imshow(mark_boundaries(temp/255, mask))
+        plt.title(f"LIME XAI: {names[lbls[0]]}")
+        plt.axis('off')
+        plt.savefig(f"{PLOT_DIR}/lime_explanation.png")
+    except Exception as e: 
+        print(f"⚠️ LIME Skipped: {e}")
 
 if __name__ == "__main__":
     run_analytics()

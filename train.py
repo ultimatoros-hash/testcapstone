@@ -49,7 +49,7 @@ class ColorJitter(layers.Layer):
         return tf.cond(tf.cast(training, tf.bool), apply, lambda: inputs)
 
 def build_model(num_classes):
-    # Explicitly defining input shape helps Keras understand the dtype
+    # Explicitly defining input shape helps Keras understand the dtyp
     inputs = layers.Input(shape=IMG_SIZE + (3,), dtype=tf.float32)
     x = layers.Rescaling(1./255)(inputs)
     

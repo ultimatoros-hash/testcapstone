@@ -6,7 +6,7 @@ DATA_DIR = "data/raw/images"
 
 def is_valid_image(path):
     try:
-        # 1. Check if empty
+        # 1. Check if empt
         if os.path.getsize(path) < 100: # Less than 100 bytes = probably empty or text
             print(f"❌ {os.path.basename(path)}: File too small (likely empty/text)")
             return False

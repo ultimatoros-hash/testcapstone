@@ -8,17 +8,15 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
 import joblib
 
-# --- CONFIG ---
+# --- CONFIG --
 DATA_DIR = "data/raw/images"
 PLOT_DIR = "data/plots"
 IMG_SIZE = (128, 128)
 
 def extract_color_histogram(image, bins=(8, 8, 8)):
-    # Extract a 3D color histogram from the HSV color space
     hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
     hist = cv2.calcHist([hsv], [0, 1, 2], None, bins,
         [0, 180, 0, 256, 0, 256])
-    # Normalize the histogram
     if hist.sum() > 0:
         cv2.normalize(hist, hist)
     return hist.flatten()
@@ -31,7 +29,6 @@ def load_data():
     
     for label in class_names:
         path = os.path.join(DATA_DIR, label)
-        # Limit to 500 images per class for speed (RF is slow with images)
         files = os.listdir(path)[:500] 
         for f in files:
             img_path = os.path.join(path, f)
@@ -39,8 +36,6 @@ def load_data():
                 image = cv2.imread(img_path)
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 image = cv2.resize(image, IMG_SIZE)
-                
-                # Feature Extraction: Color Histogram
                 hist = extract_color_histogram(image)
                 
                 data.append(hist)
@@ -64,25 +59,21 @@ def run_baseline():
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
 
-    # Evaluate
     preds = model.predict(X_test)
     acc = accuracy_score(y_test, preds)
     
     print(f"🏆 RANDOM FOREST BASELINE ACCURACY: {acc*100:.2f}%")
     
-    # Save Report
     with open(f"{PLOT_DIR}/baseline_ml_report.txt", "w") as f:
         f.write(f"RF_ACCURACY: {acc:.5f}\n")
         f.write(classification_report(y_test, preds, zero_division=0))
     
-    # Save Confusion Matrix
     cm = confusion_matrix(y_test, preds, normalize='true')
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt='.1%', cmap='Greys', xticklabels=classes, yticklabels=classes)
     plt.title(f"Baseline (Random Forest): {acc*100:.1f}%")
     plt.savefig(f"{PLOT_DIR}/baseline_confusion_matrix.png")
     
-    # Save model for comparison
     joblib.dump(model, "models/baseline_rf.pkl")
     print("✅ Baseline Complete.")
 

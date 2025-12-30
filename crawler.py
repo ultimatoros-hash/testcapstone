@@ -13,16 +13,14 @@ OUTPUT_DIR = "data/raw/images"
 CSV_FILE = "data/dataset.csv"
 ZOOM_LEVEL = 15   
 MAX_WORKERS = 12
-STEP_SIZE = 0.0045 # Tuned for ~20k total images
+STEP_SIZE = 0.0045 
 
-# --- HEADERS (Anti-Blocking) ---
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
     'Referer': 'https://www.google.com/'
 }
 
-# --- PROVIDERS ---
 PROVIDERS = {
     "esri": "https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     "usgs": "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}",
@@ -55,11 +53,11 @@ TARGETS = [
     ("desert", -25.3000, 131.0000, -25.2000, 131.1000, "esri"), # Outback
     ("desert", 21.0000, 10.0000, 21.1000, 10.1000, "nasa"),    # Sahara
 
-    # --- 5. SNOW (ADDED TO FIX MISSING CLASS) ---
-    ("snow", 64.2008, -149.4937, 64.3000, -149.4000, "usgs"),  # Alaska
-    ("snow", 72.0000, -40.0000, 72.1000, -39.9000, "esri"),    # Greenland
-    ("snow", -80.0000, 0.0000, -79.9000, 0.1000, "nasa"),      # Antarctica
-    ("snow", 46.5000, 8.0000, 46.6000, 8.1000, "esri"),        # Swiss Alps
+    # --- 5. SNOW  ---
+    ("snow", 64.0000, -17.0000, 64.1000, -16.9000, "esri"),    # Vatnajökull Glacier, Iceland
+    ("snow", 63.0000, -151.0000, 63.1000, -150.9000, "esri"),  # Denali (Mt McKinley), Alaska
+    ("snow", 28.0000, 86.9000, 28.1000, 87.0000, "esri"),      # Mount Everest Region, Himalayas
+    ("snow", 70.0000, -40.0000, 70.1000, -39.9000, "esri"),    # Greenland Ice Sheet
 ]
 
 def lat_lon_to_tile(lat, lon, zoom):
@@ -74,9 +72,10 @@ def generate_grid(lat_min, lon_min, lat_max, lon_max, step):
     lat = lat_min
     while lat < lat_max:
         lon = lon_min
-        while lon < lon_max:
-            points.append((lat, lon))
-            lon += step
+        curr_lon = lon
+        while curr_lon < lon_max:
+            points.append((lat, curr_lon))
+            curr_lon += step
         lat += step
     return points
 
@@ -91,21 +90,25 @@ def download_task(args):
     save_dir = os.path.join(OUTPUT_DIR, label)
     full_path = os.path.join(save_dir, filename)
     
-    if os.path.exists(full_path) and os.path.getsize(full_path) > 1000:
-        return None
+    if os.path.exists(full_path): return None
 
     try:
-        r = requests.get(url, headers=HEADERS, timeout=5)
+        r = requests.get(url, headers=HEADERS, timeout=15)
         if r.status_code == 200:
-            Image.open(BytesIO(r.content)).verify() # Check integrity
-            Image.open(BytesIO(r.content)).convert('RGB').save(full_path)
+            img = Image.open(BytesIO(r.content))
+            img.convert('RGB').save(full_path)
             return [filename, label, lat, lon, provider_name, url]
-    except Exception:
+    except:
         pass
     return None
 
 if __name__ == "__main__":
-    print("🚀 Initializing Crawler (5 Classes)...")
+    print("🚀 Initializing Crawler (Real Snow Targets)...")
+    
+    labels = set([t[0] for t in TARGETS])
+    for l in labels:
+        os.makedirs(os.path.join(OUTPUT_DIR, l), exist_ok=True)
+    
     if not os.path.exists(CSV_FILE):
         os.makedirs(os.path.dirname(CSV_FILE), exist_ok=True)
         with open(CSV_FILE, 'w', newline='') as f:
@@ -117,17 +120,21 @@ if __name__ == "__main__":
         for lat, lon in points:
             tasks.append((lat, lon, label, provider))
             
-    print(f"📡 Targets: {len(tasks)} tiles scheduled.")
+    print(f"📡 Scheduled: {len(tasks)} tiles.")
+    print("⏳ Starting downloads (Streaming Mode)...")
     
     count = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        results = executor.map(download_task, tasks)
+        future_to_task = {executor.submit(download_task, task): task for task in tasks}
+        
         with open(CSV_FILE, 'a', newline='') as f:
             writer = csv.writer(f)
-            for res in results:
+            for future in concurrent.futures.as_completed(future_to_task):
+                res = future.result()
                 if res:
                     writer.writerow(res)
                     count += 1
-                    if count % 200 == 0: print(f"  [+] Saved {count}...")
+                    if count % 10 == 0:
+                        print(f"  [+] Progress: {count} images saved...", end='\r')
 
-    print(f"\n✅ Crawl Complete. Total Images: {count}")
+    print(f"\n\n✅ Crawl Complete. Total Images: {count}")

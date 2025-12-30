@@ -17,7 +17,6 @@ def run_bias_check():
     print("⚖️ Running Protocol E: Dataset Bias Evaluation...")
     df = pd.read_csv(CSV_PATH)
     
-    # 1. Hemisphere Bias (North vs South)
     df['hemisphere'] = df['latitude'].apply(lambda x: 'North' if x > 0 else 'South')
     
     plt.figure(figsize=(6, 4))
@@ -25,7 +24,6 @@ def run_bias_check():
     plt.title("Figure 3.4: Hemisphere Distribution (Bias Check)")
     plt.savefig(f"{PLOT_DIR}/bias_hemisphere.png")
     
-    # 2. Regional Clusters (Lat/Lon Density)
     plt.figure(figsize=(10, 6))
     plt.hexbin(df['longitude'], df['latitude'], gridsize=20, cmap='inferno', mincnt=1)
     plt.colorbar(label='Image Count')
@@ -34,7 +32,6 @@ def run_bias_check():
     plt.ylabel("Latitude")
     plt.savefig(f"{PLOT_DIR}/bias_geographic_density.png")
     
-    # 3. Provider Bias
     if 'provider' in df.columns:
         plt.figure(figsize=(6, 4))
         sns.countplot(y='provider', data=df, palette='viridis')

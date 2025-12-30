@@ -15,10 +15,9 @@ from tensorflow.keras import layers
 
 # =============================================================================
 # 1. CONFIGURATION
-# =============================================================================
+# ============================================================================
 IMG_SIZE = (128, 128)
 PLOT_DIR = "data/plots"
-# Default to the Transfer Learning model (Best performance)
 MODEL_PATH = "models/satellite_mobilenet.h5" 
 BACKUP_PATH = "models/satellite_custom_cnn.h5"
 
@@ -32,7 +31,11 @@ st.set_page_config(
 # =============================================================================
 # 2. CUSTOM LAYERS (CRITICAL FIX FOR LOADING)
 # =============================================================================
-# We ensure these layers do NOTHING during inference to avoid messing up the image
+
+@tf.keras.utils.register_keras_serializable()
+class ColorJitter(layers.Layer):
+    def call(self, inputs, training=None): return inputs
+
 @tf.keras.utils.register_keras_serializable()
 class GentleCloudAugmentation(layers.Layer):
     def call(self, inputs, training=None): return inputs
@@ -51,24 +54,22 @@ class AtmosphericScattering(layers.Layer):
 
 @st.cache_resource
 def load_resources():
-    """Loads model and class names safely."""
+    """Loads model and class names safely with custom object mapping."""
     path = MODEL_PATH if os.path.exists(MODEL_PATH) else BACKUP_PATH
     if not os.path.exists(path): return None, None, None
     
     try:
-        # Load model with custom layers dict
         model = tf.keras.models.load_model(path, custom_objects={
+            'ColorJitter': ColorJitter,
             'GentleCloudAugmentation': GentleCloudAugmentation,
             'SensorThermalNoise': SensorThermalNoise,
             'AtmosphericScattering': AtmosphericScattering
         })
         
-        # Load Classes
         if os.path.exists('models/classes.txt'):
             with open('models/classes.txt', 'r') as f:
                 classes = f.read().splitlines()
         else:
-            # Fallback if file missing (alphabetical order is standard)
             classes = ['desert', 'forest', 'snow', 'urban', 'water']
             
         return model, classes, path
@@ -79,12 +80,11 @@ def load_resources():
 model, class_names, loaded_path = load_resources()
 
 def get_gradcam(img_array, model, last_conv_layer_name=None):
-    """Generates Grad-CAM heatmap."""
+    """Generates Grad-CAM heatmap to visualize model attention."""
     try:
         if last_conv_layer_name is None:
-            # Search for the last Conv2D layer
             for layer in reversed(model.layers):
-                if isinstance(layer, tf.keras.layers.Conv2D):
+                if isinstance(layer, tf.keras.layers.Conv2D) or 'conv' in layer.name.lower():
                     last_conv_layer_name = layer.name
                     break
         
@@ -112,36 +112,26 @@ def get_gradcam(img_array, model, last_conv_layer_name=None):
         return None
 
 def predict_with_analytics(image):
-    """Runs prediction pipeline."""
+    """Runs prediction pipeline with uncertainty and Grad-CAM."""
     if model is None: return "Error", 0, 0, np.array(image)
     
-    # 1. Preprocess
     img_resized = image.resize(IMG_SIZE)
-    img_array = np.array(img_resized) # Range 0-255
-    
-    # Expand dims for batch: (1, 128, 128, 3)
+    img_array = np.array(img_resized) 
     img_batch = np.expand_dims(img_array, 0)
     
-    # Note: We do NOT divide by 255.0 here because your train scripts 
-    # include a Rescaling layer inside the model.
-    
-    # 2. Prediction
     preds = model.predict(img_batch, verbose=0)
     idx = np.argmax(preds)
     
-    # Safety check for index
     if idx >= len(class_names):
         return "Unknown", 0, 0, img_array
         
     label = class_names[idx]
     conf = preds[0][idx] * 100
     
-    # 3. Uncertainty
     probs = preds[0]
     entropy = -np.sum(probs * np.log(probs + 1e-9))
-    uncertainty = entropy * 10 
+    uncertainty = min(100, entropy * 20) 
     
-    # 4. Grad-CAM
     heatmap = get_gradcam(img_batch, model)
     overlay = img_array
     if heatmap is not None:
@@ -154,6 +144,7 @@ def predict_with_analytics(image):
     return label, conf, uncertainty, overlay
 
 def lat_lon_to_tile(lat, lon, zoom):
+    """Converts GPS coordinates to Slippy Map tile indices."""
     lat_rad = math.radians(lat)
     n = 2.0 ** zoom
     xtile = int((lon + 180.0) / 360.0 * n)
@@ -179,9 +170,8 @@ page = st.sidebar.radio("Navigation", [
 # --- PAGE 1: LIVE MAP SCANNER ---
 if page == "1. Live Map Scanner":
     st.title("🗺️ Satellite Map Scanner")
-    st.markdown("Click anywhere on the world map to classify the environment.")
+    st.markdown("Click anywhere on the world map to classify the environment in real-time.")
 
-    # Map Setup
     m = folium.Map(location=[20, 0], zoom_start=2)
     folium.TileLayer(
         tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -195,23 +185,18 @@ if page == "1. Live Map Scanner":
         lat = out['last_clicked']['lat']
         lon = out['last_clicked']['lng']
         
-        # Tile Fetching
         zoom = 15
         x, y = lat_lon_to_tile(lat, lon, zoom)
         url = f"https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{zoom}/{y}/{x}"
         
         try:
-            # User-Agent is crucial for some tile servers
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            headers = {'User-Agent': 'Mozilla/5.0'}
             r = requests.get(url, headers=headers, timeout=5)
             
             if r.status_code == 200:
                 img = Image.open(BytesIO(r.content)).convert("RGB")
-                
-                # PREDICTION
                 label, conf, unc, heatmap = predict_with_analytics(img)
                 
-                # Display Results
                 st.divider()
                 c1, c2, c3 = st.columns([1, 1, 2])
                 
@@ -222,7 +207,7 @@ if page == "1. Live Map Scanner":
                 
                 with c2:
                     st.write("**Attention Map**")
-                    st.image(heatmap, use_container_width=True, caption="Grad-CAM")
+                    st.image(heatmap, use_container_width=True, caption="Grad-CAM Heatmap")
                 
                 with c3:
                     st.write("**Classification**")
@@ -233,83 +218,79 @@ if page == "1. Live Map Scanner":
                     st.metric("Confidence", f"{conf:.1f}%")
                     st.metric("Uncertainty", f"{unc:.2f}%")
             else:
-                st.warning("⚠️ No high-resolution imagery available here (Ocean/Remote).")
+                st.warning("⚠️ High-resolution imagery restricted or unavailable for this ocean/remote region.")
         except Exception as e:
-            st.error(f"Network Error: {e}")
+            st.error(f"Network/Inference Error: {e}")
 
 # --- PAGE 2: OVERVIEW ---
 elif page == "2. Overview":
-    st.title("🌍 Eco-Vision Project")
-    st.info("Automated Land Cover Classification using Deep Learning (MobileNetV2)")
+    st.title("🌍 Eco-Vision Project Overview")
+    st.info("Robust Land Cover Classification using Physics-Informed MobileNetV2")
     c1, c2 = st.columns([2, 1])
     with c1:
-        st.write("This project leverages Transfer Learning and Physical Domain Randomization to classify satellite imagery into 5 categories:")
-        st.markdown("* **Desert** 🏜️\n* **Forest** 🌲\n* **Water** 🌊\n* **Urban** 🏙️\n* **Snow** 🏔️")
+        st.write("This research resolves 'Spectral Ambiguity' between classes like Urban and Desert by forcing the model to learn spatial textures.")
+        st.markdown("* **Desert** 🏜️ - Low entropy, granular texture\n* **Forest** 🌲 - High VARI index, chlorophyll detection\n* **Water** 🌊 - Low reflectance, smooth surface\n* **Urban** 🏙️ - High spatial frequency, structural edges\n* **Snow** 🏔️ - High albedo, cryospheric texture")
     with c2:
-        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/e/e1/FullMoon2010.jpg/1024px-FullMoon2010.jpg", caption="Earth Observation")
+        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/e/e1/FullMoon2010.jpg/1024px-FullMoon2010.jpg", caption="Planetary Observation")
 
 # --- PAGE 3: DATA & BIAS ---
 elif page == "3. Data & Bias":
-    st.title("📊 Data Analysis")
-    t1, t2 = st.tabs(["Class Balance", "Bias Report"])
+    st.title("📊 Data Engineering & Audit")
+    t1, t2 = st.tabs(["Class Balance", "Bias Audit"])
     with t1:
         if os.path.exists(f"{PLOT_DIR}/class_balance.png"):
-            st.image(f"{PLOT_DIR}/class_balance.png", caption="Dataset Distribution")
+            st.image(f"{PLOT_DIR}/class_balance.png", caption="Training Dataset Distribution")
     with t2:
         if os.path.exists(f"{PLOT_DIR}/bias_report.txt"):
             with open(f"{PLOT_DIR}/bias_report.txt") as f: st.code(f.read())
         if os.path.exists(f"{PLOT_DIR}/bias_geographic_density.png"):
-            st.image(f"{PLOT_DIR}/bias_geographic_density.png", caption="Geographic Sampling Bias")
+            st.image(f"{PLOT_DIR}/bias_geographic_density.png", caption="Latitudinal Sampling Density")
 
 # --- PAGE 4: SCIENTIFIC VALIDATION ---
 elif page == "4. Scientific Validation":
     st.title("🔬 Scientific Validation Suite")
-    
     t1, t2, t3 = st.tabs(["Performance", "Robustness", "Physics"])
     
     with t1:
         c1, c2 = st.columns(2)
         if os.path.exists(f"{PLOT_DIR}/confusion_matrix.png"):
-            c1.image(f"{PLOT_DIR}/confusion_matrix.png", caption="Confusion Matrix")
+            c1.image(f"{PLOT_DIR}/confusion_matrix.png", caption="Normalized Confusion Matrix")
         if os.path.exists(f"{PLOT_DIR}/training_curves_transfer.png"):
-            c2.image(f"{PLOT_DIR}/training_curves_transfer.png", caption="Training Dynamics")
-        if os.path.exists(f"{PLOT_DIR}/metrics_report.txt"):
-            with open(f"{PLOT_DIR}/metrics_report.txt") as f: st.text(f.read())
+            c2.image(f"{PLOT_DIR}/training_curves_transfer.png", caption="Model Convergence Phase 1 & 2")
 
     with t2:
         if os.path.exists(f"{PLOT_DIR}/robustness_curve.png"):
-            st.image(f"{PLOT_DIR}/robustness_curve.png", caption="Protocol D: Robustness to Noise & Blur")
-        if os.path.exists(f"{PLOT_DIR}/robustness_results.json"):
-            with open(f"{PLOT_DIR}/robustness_results.json") as f: st.json(json.load(f))
+            st.image(f"{PLOT_DIR}/robustness_curve.png", caption="Protocol D: Robustness to Noise/Blur")
 
     with t3:
         if os.path.exists(f"{PLOT_DIR}/physical_metrics.png"):
-            st.image(f"{PLOT_DIR}/physical_metrics.png", caption="Protocol F: Biophysical Consistency")
+            st.image(f"{PLOT_DIR}/physical_metrics.png", caption="Protocol F: Biophysical Consistency (Entropy/VARI)")
         if os.path.exists(f"{PLOT_DIR}/lime_explanation.png"):
-            st.image(f"{PLOT_DIR}/lime_explanation.png", caption="LIME Explanation")
+            st.image(f"{PLOT_DIR}/lime_explanation.png", caption="XAI: LIME Super-pixel Attribution")
 
 # --- PAGE 5: UPLOAD INFERENCE ---
 elif page == "5. Live Inference (Upload)":
-    st.title("🧠 Single Image Analysis")
-    f = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
+    st.title("🧠 Direct Inference Engine")
+    f = st.file_uploader("Upload a Satellite Image", type=["jpg", "png", "jpeg"])
     if f:
         img = Image.open(f).convert("RGB")
         label, conf, unc, heatmap = predict_with_analytics(img)
         
         c1, c2 = st.columns(2)
-        c1.image(img, caption="Source", use_container_width=True)
-        c2.image(heatmap, caption="Grad-CAM", use_container_width=True)
+        c1.image(img, caption="Source Input", use_container_width=True)
+        c2.image(heatmap, caption="AI Feature Attention", use_container_width=True)
         
         st.divider()
-        st.success(f"**{label.upper()}** ({conf:.1f}%)")
-        st.caption(f"Uncertainty: {unc:.2f}%")
+        st.success(f"**Classification:** {label.upper()} ({conf:.1f}% Confidence)")
+        st.caption(f"Entropy-based Uncertainty: {unc:.2f}%")
 
 # --- PAGE 6: TIME MACHINE ---
 elif page == "6. Time Machine":
-    st.title("⏳ Change Detection")
+    st.title("⏳ Temporal Change Detection")
+    st.markdown("Upload two images of the same location at different times to detect land-cover transitions.")
     c1, c2 = st.columns(2)
-    f1 = c1.file_uploader("Time T1", key="t1")
-    f2 = c2.file_uploader("Time T2", key="t2")
+    f1 = c1.file_uploader("Time T1 (Past)", key="t1")
+    f2 = c2.file_uploader("Time T2 (Present)", key="t2")
     
     if f1 and f2:
         img1 = Image.open(f1).convert("RGB")
@@ -323,6 +304,6 @@ elif page == "6. Time Machine":
         with col2: st.image(img2, caption=f"T2: {l2.upper()}", use_container_width=True)
         
         if l1 != l2:
-            st.error(f"🚨 CHANGE DETECTED: {l1.upper()} ➝ {l2.upper()}")
+            st.error(f"🚨 TRANSITION DETECTED: {l1.upper()} ➝ {l2.upper()}")
         else:
-            st.success("✅ No Change Detected")
+            st.success("✅ STABLE: No Land-Cover Transition Detected")

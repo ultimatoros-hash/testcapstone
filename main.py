@@ -8,25 +8,27 @@ def run_command(script_name):
     exit_code = os.system(f"python {script_name}")
     if exit_code != 0:
         print(f"❌ Error running {script_name}")
-        # We don't exit here to allow partial runs, but you could: sys.exit(1)
 
 def main():
     # 1. Data Acquisition
-    # run_command("crawler.py") # Uncomment if you need to download data
-    # run_command("cleaner.py") # Uncomment to clean data
+    run_command("crawler.py") 
+    run_command("cleaner.py") 
+    run_command("cleaner_sorter.py") 
     
     # 2. Baselines (Context)
     run_command("baseline_ml.py")   # Classical ML (Random Forest)
     run_command("train.py")         # Deep Learning Baseline (Custom CNN)
     
-    # 3. SOTA Model (The Solution)
     run_command("train_transfer.py") # Transfer Learning (MobileNetV2)
     
     # 4. Evaluation Suite
-    run_command("visualize_results.py") # Confusion Matrix & t-SNE
-    run_command("test_robustness.py")   # Protocol D
-    run_command("advanced_analytics.py")# Protocol F
-    run_command("evaluate_bias.py")     # Protocol E
+    run_command("train_kfold.py")
+    run_command("visualize_results.py") 
+    run_command("test_robustness.py") 
+    run_command("advanced_analytics.py")
+    run_command("evaluate_bias.py")     
+    run_command("extra_analytics.py")     
+
     
     # 5. Launch App
     print("\n✅ Pipeline Complete. Launching Dashboard...")

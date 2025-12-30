@@ -46,7 +46,6 @@ def make_gradcam_heatmap(img_array, model, last_conv_layer_name=None):
     heatmap = last_conv_layer_output @ pooled_grads[..., tf.newaxis]
     heatmap = tf.squeeze(heatmap)
 
-    # 8. Normalize the heatmap between 0 & 1
     heatmap = tf.maximum(heatmap, 0) / tf.math.reduce_max(heatmap)
     
     return heatmap.numpy()
@@ -55,18 +54,12 @@ def save_and_display_gradcam(img, heatmap, alpha=0.4):
     """
     Overlays the heatmap on the original image.
     """
-    # Rescale heatmap to a range 0-255
     heatmap = np.uint8(255 * heatmap)
 
-    # Use jet colormap to colorize heatmap
     jet = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
 
-    # Resize the heatmap to the size of the original image
     img = np.array(img)
     jet = cv2.resize(jet, (img.shape[1], img.shape[0]))
 
-    # Superimpose the heatmap on original image
     superimposed_img = jet * alpha + img
-    
-    # Clip to valid range [0, 255] and return
     return np.clip(superimposed_img, 0, 255).astype('uint8')

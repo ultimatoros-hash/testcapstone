@@ -11,7 +11,7 @@ from lime import lime_image
 from skimage.segmentation import mark_boundaries
 from tensorflow.keras import layers
 
-# --- CONFIG ---
+# --- CONFIG --
 DATA_DIR = "data/raw/images"
 PLOT_DIR = "data/plots"
 IMG_SIZE = (128, 128)
@@ -21,6 +21,23 @@ PALETTE = {
     "snow": "#d1d5db", "water": "#3b82f6", 
     "forest": "#16a34a", "urban": "#ef4444", "desert": "#f97316"
 }
+
+# --- CUSTOM LAYERS ---
+@tf.keras.utils.register_keras_serializable()
+class ColorJitter(layers.Layer):
+    def call(self, inputs, training=None): return inputs
+
+@tf.keras.utils.register_keras_serializable()
+class GentleCloudAugmentation(layers.Layer):
+    def call(self, inputs, training=None): return inputs
+
+@tf.keras.utils.register_keras_serializable()
+class SensorThermalNoise(layers.Layer):
+    def call(self, inputs, training=None): return inputs
+
+@tf.keras.utils.register_keras_serializable()
+class AtmosphericScattering(layers.Layer):
+    def call(self, inputs, training=None): return inputs
 
 def load_sample_data(num_samples=300):
     print("Loading sample data for biophysics...")
@@ -37,24 +54,19 @@ def load_sample_data(num_samples=300):
 def calculate_vari(image):
     """
     Visible Atmospherically Resistant Index (VARI)
-    Formula: (G - R) / (G + R - B)
+    
     """
     img = image.astype('float32')
     R, G, B = img[:,:,0], img[:,:,1], img[:,:,2]
     
     numerator = G - R
     denominator = G + R - B
-    
-    # Safe division
     vari_map = numerator / (denominator + 1e-6)
-    
-    # Clip to valid range [-1, 1] to remove outliers
     return np.median(np.clip(vari_map, -1.0, 1.0))
 
 def run_analytics():
     if not os.path.exists(PLOT_DIR): os.makedirs(PLOT_DIR)
     
-    # 1. Load Data
     imgs, lbls, names = load_sample_data(300)
     
     # --- PART 1: BIOPHYSICAL METRICS ---
@@ -65,17 +77,15 @@ def run_analytics():
         name = names[lbl_idx]
         if name not in PALETTE: continue
         
-        # Entropy (Texture)
         gray = tf.image.rgb_to_grayscale(img).numpy().squeeze().astype('uint8')
         metrics['entropy'].append(shannon_entropy(gray))
         
-        # VARI (Vegetation)
         metrics['vari'].append(calculate_vari(img))
         metrics['label'].append(name)
     
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
     sns.boxplot(x='label', y='entropy', data=metrics, ax=ax1, palette=PALETTE)
-    ax1.set_title("Figure 4.1a: Spatial Entropy (Texture)")
+    ax1.set_title("Figure 4.1a: Spatial Entropy (Texture Complexity)")
     
     sns.boxplot(x='label', y='vari', data=metrics, ax=ax2, palette=PALETTE)
     ax2.set_title("Figure 4.1b: VARI Index (Vegetation Health)")
@@ -85,11 +95,11 @@ def run_analytics():
     plt.savefig(f"{PLOT_DIR}/physical_metrics.png")
     
     # --- PART 2: FFT ANALYSIS ---
+    # 
     print("🌊 Generating Figure 4.2: FFT Frequency Analysis...")
     fig, axes = plt.subplots(1, 5, figsize=(20, 4))
     for i, target in enumerate(PALETTE.keys()):
         if target not in names: continue
-        # Find first image of this class
         idx = np.where(lbls == names.index(target))[0]
         if len(idx) > 0:
             img_gray = np.mean(imgs[idx[0]], axis=2)
@@ -99,34 +109,26 @@ def run_analytics():
             axes[i].imshow(magnitude, cmap='inferno')
             axes[i].set_title(target.title())
             axes[i].axis('off')
-        else: axes[i].axis('off')
     plt.savefig(f"{PLOT_DIR}/fft_spectrum_analysis.png")
     
     # --- PART 3: LIME EXPLANATION ---
+    # 
     print("🍋 Generating Figure 4.4: LIME Explanation...")
     try:
-        # Dummy layers for loading
-        class GentleCloudAugmentation(layers.Layer):
-            def call(self, i, t=None): return i
-        class SensorThermalNoise(layers.Layer):
-            def call(self, i, t=None): return i
-        class AtmosphericScattering(layers.Layer):
-            def call(self, i, t=None): return i
-            
         model = tf.keras.models.load_model(MODEL_PATH, custom_objects={
+            'ColorJitter': ColorJitter,
             'GentleCloudAugmentation': GentleCloudAugmentation, 
             'SensorThermalNoise': SensorThermalNoise, 
             'AtmosphericScattering': AtmosphericScattering
         })
         
         explainer = lime_image.LimeImageExplainer()
-        # Explain the first image
         exp = explainer.explain_instance(imgs[0].astype('double'), model.predict, top_labels=1, hide_color=0, num_samples=100)
         temp, mask = exp.get_image_and_mask(exp.top_labels[0], positive_only=True, num_features=5, hide_rest=False)
         
         plt.figure(figsize=(6, 6))
         plt.imshow(mark_boundaries(temp/255, mask))
-        plt.title(f"LIME: {names[lbls[0]]}")
+        plt.title(f"LIME XAI: {names[lbls[0]]}")
         plt.axis('off')
         plt.savefig(f"{PLOT_DIR}/lime_explanation.png")
     except Exception as e: 
