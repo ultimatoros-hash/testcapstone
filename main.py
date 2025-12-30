@@ -1,0 +1,36 @@
+import os
+import sys
+
+def run_command(script_name):
+    print(f"\n{'='*60}")
+    print(f"🎬 RUNNING: {script_name}")
+    print(f"{'='*60}")
+    exit_code = os.system(f"python {script_name}")
+    if exit_code != 0:
+        print(f"❌ Error running {script_name}")
+        # We don't exit here to allow partial runs, but you could: sys.exit(1)
+
+def main():
+    # 1. Data Acquisition
+    # run_command("crawler.py") # Uncomment if you need to download data
+    # run_command("cleaner.py") # Uncomment to clean data
+    
+    # 2. Baselines (Context)
+    run_command("baseline_ml.py")   # Classical ML (Random Forest)
+    run_command("train.py")         # Deep Learning Baseline (Custom CNN)
+    
+    # 3. SOTA Model (The Solution)
+    run_command("train_transfer.py") # Transfer Learning (MobileNetV2)
+    
+    # 4. Evaluation Suite
+    run_command("visualize_results.py") # Confusion Matrix & t-SNE
+    run_command("test_robustness.py")   # Protocol D
+    run_command("advanced_analytics.py")# Protocol F
+    run_command("evaluate_bias.py")     # Protocol E
+    
+    # 5. Launch App
+    print("\n✅ Pipeline Complete. Launching Dashboard...")
+    os.system("streamlit run app.py")
+
+if __name__ == "__main__":
+    main()
