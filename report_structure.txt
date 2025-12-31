@@ -1,0 +1,87 @@
+Partie I : Contexte et État de l'Art (8 Pages)
+Chapitre 1 : Introduction (3 Pages)
+
+1.1 Urgence environnementale et surveillance planétaire : Présentez l'Anthropocène et expliquez pourquoi la télédétection par satellite (SRS) est l'outil ultime pour surveiller la déforestation, l'étalement urbain et la fonte des glaces.
+
+
+1.2 Le paradoxe des données : Abondance vs Interprétation : Expliquez que nous avons des pétaoctets d'images, mais que l'inspection manuelle est impossible à l'échelle mondiale. Soulignez le besoin d'une interprétation automatisée robuste.
+
+
+
+1.3 Objectifs et piliers d'Eco-Vision : Présentez les quatre piliers : Ingénierie de données de haute qualité, Transfer Learning, Raisonnement physique et IA éthique/interprétable.
+
+Chapitre 2 : État de l'Art et Fondements Théoriques (5 Pages)
+
+2.1 Limites des méthodes classiques : Analysez pourquoi les indices comme le NDVI/NDWI ou les algorithmes comme le Random Forest peinent à intégrer le contexte spatial et échouent face aux ambiguïtés spectrales.
+
+
+
+
+2.2 Fondamentaux du Deep Learning : Expliquez mathématiquement la convolution et comment elle permet d'extraire des hiérarchies de caractéristiques (bords, textures, objets).
+
+
+
+2.3 Transfer Learning et MobileNetV2 : Justifiez le choix de MobileNetV2 pour son efficacité computationnelle grâce aux "depthwise separable convolutions", cruciales pour un déploiement réel.
+
+
+Partie II : Ingénierie des Données (10 Pages)
+Chapitre 3 : Acquisition et Pipeline d'Extraction (5 Pages)
+3.1 Architecture du Crawler multi-threadé : Détaillez le fonctionnement de crawler.py. Expliquez la projection Web Mercator et le système de tuiles (Slippy Map tiling).
+
+
+
+3.2 Stratégie de résolution (Zoom Level 15) : Argumentez sur le choix du niveau de zoom 15 (environ 4,7m/pixel) comme point d'équilibre entre le détail textural (canopée, bâtiments) et le contexte sémantique.
+
+
+
+3.3 Diversité des sources : Expliquez l'intégration de différents fournisseurs comme Esri, USGS et NASA pour augmenter la variabilité des données.
+
+
+Chapitre 4 : Audit de Qualité et Nettoyage Biophysique (5 Pages)
+4.1 Analyse critique des biais : Utilisez vos graphiques pour montrer le biais vers l'hémisphère Nord (>5500 images contre ~1200 au Sud) et la dépendance au fournisseur Esri.
+
+
+4.2 Protocole de nettoyage via l'indice VARI : Expliquez comment cleaner_sorter.py utilise l'indice VARI pour s'assurer que la classe "Forest" contient bien de la végétation et corriger les erreurs de classification automatique.
+
+
+
+4.3 Gestion du "Label Noise" : Détaillez la logique de redistribution des images (ex: déplacer une image "Snow" vers "Forest" si le VARI est élevé).
+
+Partie III : Méthodologie et Modélisation (10 Pages)
+Chapitre 5 : Feature Engineering "Physics-Informed" (5 Pages)
+
+5.1 Philosophie de la randomisation de domaine : Expliquez pourquoi vous entraînez le modèle pour un "monde imparfait" afin qu'il soit robuste face à la réalité opérationnelle.
+
+
+5.2 Simulation des dégradations : Détaillez les couches personnalisées. Expliquez comment vous simulez le bruit thermique des capteurs et la diffusion atmosphérique (scattering).
+
+
+
+5.3 Couches d'augmentation personnalisées : Insérez et expliquez des extraits de code pour AtmosphericScattering et ColorJitter, justifiant leur rôle dans la réduction de la confusion entre Urban/Desert.
+
+Chapitre 6 : Architecture et Entraînement (5 Pages)
+6.1 Design de la tête de classification : Décrivez l'ajout de couches "Global Average Pooling" et de régularisation (Dropout à 0.5) pour éviter le surapprentissage.
+
+6.2 Stratégie d'optimisation : Détaillez l'utilisation de l'optimiseur Adam et la stratégie de Fine-Tuning en deux phases (entraînement de la tête, puis dégel des 50 dernières couches du backbone).
+
+
+6.3 Reproductibilité et MLOps : Mentionnez l'utilisation de graines aléatoires (seeds) fixes et la gestion de l'environnement pour garantir la validité des recherches.
+
+
+Partie IV : Analyse des Résultats et Interprétabilité (12 Pages)
+Chapitre 7 : Évaluation de la Performance et Robustesse (6 Pages)
+7.1 Analyse comparative : RF vs MobileNetV2 : Comparez la baseline Random Forest (96.9%) au modèle Deep Learning (79.7%). Expliquez le paradoxe : le RF mémorise des couleurs globales, le CNN cherche des textures plus complexes.
+
+7.2 Le "Snow Paradox" : Analysez la matrice de confusion montrant que 36% de la neige est confondue avec l'eau, et expliquez les similitudes spectrales.
+
+7.3 Stress-test de robustesse (Protocole D) : Commentez la robustness_curve.png. Expliquez pourquoi le modèle résiste bien au flou (>90% d'accuracy) mais chute face au bruit, soulignant sa dépendance aux hautes fréquences texturales.
+
+Chapitre 8 : Explicabilité et Validation Scientifique (6 Pages)
+8.1 Attribution spatiale (Grad-CAM et LIME) : Montrez comment LIME identifie les super-pixels de canopée pour la forêt. Utilisez Grad-CAM pour prouver que l'IA regarde les structures (bâtiments) et non le ciel.
+
+
+8.2 Analyse fréquentielle (FFT) : Expliquez comment la FFT révèle les signatures texturales uniques, comme les pics directionnels des dunes du désert ou les hautes fréquences diffuses de l'urbain.
+
+8.3 Cohérence biophysique (Entropie/VARI) : Validez les prédictions en montrant que la classe Urban a l'entropie la plus élevée (complexité) et Forest le VARI le plus haut.
+
+8.4 Étude de l'espace latent (t-SNE) : Analysez les clusters de tsne_clusters.png pour confirmer la séparation mathématique des classes, tout en notant la proximité des clusters Snow/Water.
